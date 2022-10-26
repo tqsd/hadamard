@@ -16,17 +16,23 @@
 #    sum_{phi_1,...,phi_K} p_R(b|\tilde a(phi_1, ..., phi_K))
 
 
+import scipy.integrate
 import scipy.special as scps
+import seaborn as sns
 import scipy.stats as stats
 import matplotlib.pyplot as plt
 from scipy.special import i0
 from scipy.special import i1
+import scipy
 import numpy as np
 import random
 import itertools
 import collections
 import math
+import mpmath
+import scipy
 
+plt.rcParams.update({'font.size': 16}) # change font size in plots
 
 def rX(a, K, kappa, equalPort=True):
     # calculates the received signal when listening at the right or at the wrong port under iid van Mises noise with kappa=kappa
@@ -49,11 +55,34 @@ def rX(a, K, kappa, equalPort=True):
     return rx
 
 
+def rX_norm(a, K, c, equalPort=True):
+    # calculates the received signal when listening at the right or at the wrong port under iid wrapped normal noise with c=c
+    # K has to be a power of two!!
+    rx = 0
+    s = [0 for i in range(K)]
+
+    eins = scipy.special.iv(2, c) / scipy.special.iv(0, c)
+    zwei = (scipy.special.iv(1, c) ** 2) / (scipy.special.iv(0, c) ** 2)
+    drei = (scipy.special.iv(1, c) ** 2) / (2*scipy.special.iv(0, c) ** 2)
+    varvm = (eins - zwei)*np.cos(2*0)-drei
+    #rx = rX_norm(a, K, varvm, True)
+    mu = (scipy.special.iv(1,c)/scipy.special.iv(0,c)) * np.cos(0)
+
+    s = np.random.normal(0,varvm**2, size=K)
+
+    if equalPort:
+        rx = a * sum([np.exp(-complex(0, s[i])) for i in range(K)]) / np.sqrt(K)
+    else:
+        diffSum = sum([np.power(-1, i) * np.exp(complex(0, s[i])) for i in range(int(K))])
+        rx = a * diffSum / np.sqrt(K)
+    return rx
+
 
 def homodyne(a, displacement, epsilon):
+    # calculates the output probabilities of the homodyne detector
     pMinusA = 0.5*( 1 - scps.erf(np.sqrt(2)*(a+epsilon)))
     pZero = 0.5*( scps.erf(np.sqrt(2)*(epsilon - a)) + scps.erf(np.sqrt(2)*(a+epsilon)))
-    pPlusA = 0.5*( 1 - scps.erf(np.sqrt(2)*(epsilon - a)))
+    #pPlusA = 0.5*( 1 - scps.erf(np.sqrt(2)*(epsilon - a)))
     #print("a=",a,"displacement=",displacement, "epsilon=",epsilon)
     #print("pMinus=",pMinusA.real,"pZero=",pZero.real,"pLusA=",pPlusA.real)
     coin = random.random()
@@ -74,7 +103,7 @@ def sampledQ(e, K, kappa, samples):
     # the output has form [q( |a,k=l), q( |b,k=l), q( |a,k#l), q( |b,k#l)]
     # it holds a=sqrt(e) and b=-sqrt(e) (BPSK)
     # "k = l" indicates the probability distribution at the same port, k#l quantifies the statistics if one listens at the wrong port
-    print("sampledQ thinks samples equals",samples)
+    # print("sampledQ thinks samples equals",samples)
     aa = 0
     ba = 0
     zeroA = 0
@@ -88,7 +117,7 @@ def sampledQ(e, K, kappa, samples):
     b0b = 0
     zero0b = 0
     displ = e*np.sqrt(K)
-    epsilon = displ/2
+    epsilon = displ/2 # has to be optimized
     for i in range(samples):
         # calculate what happens if "+" is sent
         a = displ
@@ -147,6 +176,79 @@ def sampledQ(e, K, kappa, samples):
              [[a0a / samples, b0a / samples, zero0a / samples], [a0b / samples, b0b / samples, zero0b / samples]]]
     return q
 
+def sampledQ_norm(e, K, kappa, samples):
+    # samples the classical channel defined from using a Hadamard receiver with words of length K with wrapped normal phase noise
+    # the output has form [q( |a,k=l), q( |b,k=l), q( |a,k#l), q( |b,k#l)]
+    # it holds a=sqrt(e) and b=-sqrt(e) (BPSK)
+    # "k = l" indicates the probability distribution at the same port, k#l quantifies the statistics if one listens at the wrong port
+    # print("sampledQ thinks samples equals", samples)
+    aa = 0
+    ba = 0
+    zeroA = 0
+    ab = 0
+    bb = 0
+    zeroB = 0
+    a0a = 0
+    b0a = 0
+    zero0a = 0
+    a0b = 0
+    b0b = 0
+    zero0b = 0
+    displ = e * np.sqrt(K)
+    epsilon = displ - (1/np.sqrt(2))*scipy.special.erfinv(1-2*0.1)
+    for i in range(samples):
+        # calculate what happens if "+" is sent
+        a = displ
+        b = -a
+        # add noise to a
+        rx = rX_norm(a, K, kappa, True)
+        # get output of homodyne receiver if listening at the CORRECT port & check if decoded correctly
+        out = homodyne(rx, displ, epsilon)
+        if out == a:
+            aa += 1
+        elif out == b:
+            ba += 1
+        elif out == 0:
+            zeroA += 1
+        else:
+            print(out)
+            raise ValueError('Homodyne receiver gave strange output')
+        # calculate what happens if "-" is sent
+        # add noise
+        rx = rX_norm(b, K, kappa, True)
+        out = homodyne(rx, displ, epsilon)
+        if out == b:
+            bb += 1
+        elif out == a:
+            ab += 1
+        elif out == 0:
+            zeroB += 1
+        else:
+            print(out)
+            raise ValueError('Homodyne receiver gave strange output')
+        # get output of Homodyne receiver if listening at the WRONG port
+        rx = rX_norm(a, K, kappa, False)
+        out = homodyne(rx, displ, epsilon)
+        if out == a:
+            a0a += 1
+        elif out == b:
+            b0a += 1
+        elif out == 0:
+            zero0a += 1
+        rx = rX_norm(b, K, kappa, False)
+        # get output of homodyne receiver if listening at the WRONG port
+        out = homodyne(rx, displ, epsilon)
+        if out == a:
+            a0b += 1
+        elif out == b:
+            b0b += 1
+        elif out == 0:
+            zero0b += 1
+        q = [[[aa / samples, ba / samples, zeroA / samples], [ab / samples, bb / samples, zeroB / samples]],
+             [[a0a / samples, b0a / samples, zero0a / samples], [a0b / samples, b0b / samples, zero0b / samples]]]
+    return q
+
+
 
 def condDistrib(a, bK, k, q):
     # the transmitted symbol at port k is a
@@ -197,6 +299,7 @@ def outDistrib(q, bK):
     return oD
 
 def pLogP(p):
+    # gives p * log_2(p) as output
     out = 0
     if p > 0:
         out = p * np.log2(p)
@@ -267,10 +370,11 @@ def mutualInformation(q, K):
                     if od > 0:
                         #print( - size([ i, j, K - i - j ]) * od * np.log2(od))
                         outH -= size([i, j, K - 1 - i - j])* od * np.log2(od)
-    print("sum-to-one test:",st1)
-    print("sum to alphabet size test:",stAS)
-    print("outH=",outH)
-    print("condH=",condH)
+    # for testing purposes
+    #print("sum-to-one test:",st1)
+    #print("sum to alphabet size test:",stAS)
+    #print("outH=",outH)
+    #print("condH=",condH)
     return outH - condH
 
 def capacity(q, K):
@@ -310,93 +414,246 @@ def sHol (tau, ns, noise):
         return g( ns*tau + noise )
 
 if __name__ == "__main__" :
+    # lists for plots
+    liste = []
+    liste2 = []
+    liste_h = []
+    liste2_h = []
 
-        
-    baudrateCalculations = False
-    if baudrateCalculations:
+    listeg = []
+    liste2g = []
+    liste_hg = []
+    liste2_hg = []
+
+
+    # check mutual info
+    mutualInfoCheck = True
+    # change to True if plots are wanted
+    plot = True
+
+    # check baudrate calucaltions
+    baudrateCheck = True
+
+    if mutualInfoCheck:
+        for j in [1, 0.1, 0.001]:
+
+            kap = 1
+            a = j
+            samples = 1000
+
+            print("a=", a, "kappa=", kap, "samples=", samples)
+            m1 = shannonCapacity(kap, a)
+            print("benchmark is Shannon capacity", m1)
+            liste.append(m1)
+            liste2.append(m1)
+            for i in range(7):
+                K = int(np.power(2, i))
+                q = sampledQ_norm(a, K, kap, samples)
+                displ = a * np.sqrt(K)
+                epsilon = displ - (1 / np.sqrt(2)) * scipy.special.erfinv(1 - 2 * 0.1)
+
+                m = mutualInformation(q, K)
+                c = m / K
+                liste.append(m)
+                liste2.append(c)
+                print("at K=", K, "we have capacity", m, c)
+        # for j in [1, 0.1, 0.001]:
+        #    kap = 1
+        #   a = j
+        #  samples = 1000
+        # print("a=", a, "kappa=", kap, "samples=", samples)
+        # m1 = shannonCapacity(kap, a)
+        # print("benchmark is Shannon capacity", m1)
+        # listeg.append(m1)
+        # liste2g.append(m1)
+        # for i in range(7):
+        #   K = int(np.power(2, i))
+        #  q = sampledQ_norm(a, K, kap, samples)
+        # m = mutualInformation(q, K)
+        # c = m / K
+        # listeg.append(m)
+        # liste2g.append(c)
+        # print("at K=", K, "we have capacity", m, c)
+        if plot:
+            plt.figure()
+            xlables = [1, 2, 4, 8, 16, 32, 64]
+            samples = 1000
+            plt.title("Mutual Information of the Joint Detection Receiver with sigma= " + str(
+                kap) + "and kappa =" + str(kap))
+            plt.plot(range(1, 7), liste[2:8], label="vM quantum a = 1")
+            plt.plot(range(1, 7), liste[10:16], label="vM quantum a = 0.01")
+            plt.plot(range(1, 7), liste[18:24], label="vM quantum a = 0.001")
+            # plt.plot(range(1, 7), listeg[2:8], label="WN quantum a = 1")
+            # plt.plot(range(1, 7), listeg[10:16], label="WN quantum a = 0.01")
+            # plt.plot(range(1, 7), listeg[18:24], label="WN quantum a = 0.001")
+            plt.legend()
+            plt.xlim(1, 7)
+            plt.xticks(range(0, 7), xlables)
+            plt.xlabel('n', labelpad=3)
+            plt.ylabel('Mutual Information')
+            plt.grid()
+
+            plt.figure()
+            plt.title("Capacity of the Joint Detection Receiver with sigma= " + str(
+                kap) + " samples = " + str(samples))
+            plt.plot(range(1, 7), liste2[2:8], label="vM quantum a = 1")
+            plt.plot(range(1, 7), liste2[10:16], label="vM quantum a = 0.01")
+            plt.plot(range(1, 7), liste2[18:24], label="vM quantum a = 0.001")
+            # plt.plot(range(1, 7), liste2g[2:8], label="N quantum a = 1")
+            # plt.plot(range(1, 7), liste2g[10:16], label="N quantum a = 0.01")
+            # plt.plot(range(1, 7), liste2g[18:24], label="N quantum a = 0.001")
+            plt.legend()
+            plt.xlim(1, 7)
+            plt.xticks(range(0, 7), xlables)
+            plt.xlabel('n', labelpad=3)
+            plt.ylabel('Capacity')
+            plt.grid()
+            plt.show()
+
+    if baudrateCheck:
+        # lists for plots
+        baudrate_list = []
+        kappa_list = []
+        mutInfo_list = []
+        shanInfo_list = []
+        hadaCap_list = []
+        shanCap_list = []
+        photnum_list = []
         kap = 0.001
-        A = np.exp(-0.05*220)*10**16
-        print("lowest expected photon numer at receiver is",A/((100+20*10)*(10**9)))
+        A = np.exp(-0.05 * 250) * 10 ** 16
         samples = 1000
-        print("A=",A,"kappa=",kap,"samples=",samples)
+        print("A=", A, "kappa=", kap, "samples=", samples)
         holData = []
         shData = []
-        for b in range(20):
-            br = (100+b*10)*(10**9)
-            kap = kappa(10**16,br)
-            K = int(np.power(2,2))
-            holAvg = 0
+        holVar_list_2 = []
+        holVar_list_4 = []
+        holVar_list_8 = []
+        holVar_list_16 = []
+        holVar_list_32 = []
+        shVar_list = []
+        holavg_list_2 = []
+        holavg_list_4 = []
+        holavg_list_8 = []
+        holavg_list_16 = []
+        holavg_list_32 = []
+        shavg_list = []
+
+        for b in range(30):
+            # loop over baudrates for shannon capacity
+            br = (100 + b * 10) * (10 ** 9)
+            print("photon number is", A / br)
+            baudrate_list.append(br / (10 ** 9))
+            kap = kappa(10 ** 16, br)
+            print("kappa", kap)
+
             shAvg = 0
             holCapacities = []
             shCapacities = []
             for step in range(20):
-                q = sampledQ( A/br ,K ,kap ,samples)
-                m = mutualInformation(q, K)
-                holCap = m/K
-                holAvg += holCap
-                holCapacities += [holCap]
-                shCap = shannonCapacity(kap,A/br)
+                # get average shannon capacity
+                shCap = shannonCapacity(kap, A / br)
                 shAvg += shCap
                 shCapacities += [shCap]
-                #print("at baudrate=",br,"we have photon number ",A/br)
-                #print("at baudrate=",br,"we have Hadamard capacity",br*m/K)
-                #print("at baudrate=",br,"we have Shannon capacity",br*shannonCapacity(kap,A/br))
-            holVariance = 0
-            holAvg = holAvg/(20)
+
             shVariance = 0
-            shAvg = shAvg/20
+            shAvg = shAvg / 20
+            shavg_list.append(shAvg * br)
             for step in range(20):
-                holVariance += (holAvg - holCapacities[step])**2
-                shVariance += (shAvg - shCapacities[step])**2
-            shVariance = np.sqrt(shVariance/(20-1))
-            holVariance = np.sqrt(holVariance/(20-1))
-            print("at baudrate=",br,"Shannon average=",shAvg,"variance=",shVariance)
-            print("at baudrate=",br,"Holevo average=",holAvg,"variance=",holVariance)
-            holData += [[br, br*holAvg, br*holVariance]]
-            shData += [[br, br*shAvg, br*shVariance]]
-        print(holData)
-        print(shData)
+                # get shannon capacity variance
+                shVariance += (shAvg - shCapacities[step]) ** 2
+            shVariance = np.sqrt(shVariance / (20 - 1))
+            shVar_list.append(shVariance * br)
 
+            print("at baudrate=", br, "Shannon average=", shAvg, "variance=", shVariance)
 
+        for b in range(30):
+            # loop over baudrate for jdr capacity
+            br = (100 + b * 10) * (10 ** 9)
+            print("photon number is", A / br)
 
-    tau = np.exp(-0.05*600)
-    power = (10**22)
-    A = tau*power
-    samples = 1000
-    br = (4000)*(10**9)
-    kap = kappa(10**16,br)
-    K = int(np.power(2,3))
-    #print(rX(A/br, K, kap, equalPort=True))
-    #print(rX(A/br, K, kap, equalPort=False))
-    #print("getting q")
-    q = sampledQ( A/br ,K ,kap ,samples)
-    condDistribTest = 0
-    for i in range(K ):
-        # define how many -1's are detected (logical 1), at ports other than port 1:
-        for j in range( K - i ):
-            bK = [ 0 for m in range(i)]
-            bK = bK + [ 1 for m in range(j) ]
-            # define how many 0's (logical 2) are detected:
-            bK = bK + [ 2 for m in range(K -1 - i - j)  ]
-            # now average over the input variables:
-            od = 0
-            #print("calculating output entropy for bK=",bK,"i=",i,"j=",j)
-            for b in range(3):
-                n0 = i
-                n1 = j
-                condDistribTest += size([n0, n1, K - 1 - n0 - n1])*condDistrib(1, [b] + bK, 0, q)
-    print("cd test",condDistribTest)
+            kap = kappa(10 ** 16, br)
 
-  
-    #print(q)
-    m = mutualInformation(q, K)
-    print(m)
-    print(homodyne(0, 1, 0.5))
-    print(sHol(tau,power/br,0))
-    print(" kappa=",kap,
-          "\n Hadamard order is",K,
-          "\n Hadamard Capacity is",math.log(br*m/K, 10),
-          "\n Hadamard efficiency is",m/K,
-          "\n photon number at receiver is ",A/br,
-          "\n Shannon capacity is",math.log(br*shannonCapacity(kap,A/br,samples), 10))
+            holAvg = 0
+            holCapacities = []
+            shCapacities = []
+            for k in [4, 32]:
+                holCapacities = []
+                holAvg = 0
+                for step in range(20):
+                    K = k
+                    q = sampledQ(A / br, K, kap, samples)
+                    m = mutualInformation(q, K)
+
+                    holCap = m / K
+                    holAvg += holCap
+                    holCapacities += [holCap]
+
+                holVariance = 0
+                holAvg = holAvg / (20)
+
+                if K == 4:
+                    holavg_list_4.append(holAvg * br)
+
+                if K == 32:
+                    holavg_list_32.append(holAvg * br)
+
+                for step2 in range(20):
+                    holVariance += (holAvg - holCapacities[step2]) ** 2
+
+                holVariance = np.sqrt(holVariance / (20 - 1))
+
+                if K == 4:
+                    holVar_list_4.append(holVariance * br)
+
+                if K == 32:
+                    holVar_list_32.append(holVariance * br)
+
+                print("at baudrate=", br, "Holevo average=", holAvg, "variance=", holVariance, "K= ", K)
+
+        if plot:
+            blah = 30
+            xlables = baudrate_list
+            plt.figure()
+            clrs = sns.color_palette("husl", 5)
+            plt.title("Holevo Average with Variance with lowest expected photon number at receiver is " + str(
+                A / br))
+            var4min = []
+            var4plus = []
+            for i in range(len(holVar_list_4)):
+                var4min.append(holavg_list_4[i] - holVar_list_4[i])
+                var4plus.append(holavg_list_4[i] + holVar_list_4[i])
+            var32min = []
+            var32plus = []
+            for i in range(len(holVar_list_4)):
+                var32min.append(holavg_list_32[i] - holVar_list_32[i])
+                var32plus.append(holavg_list_32[i] + holVar_list_32[i])
+            varshmin = []
+            varshplus = []
+            for i in range(len(holVar_list_4)):
+                varshmin.append(shavg_list[i] - shVar_list[i])
+                varshplus.append(shavg_list[i] + shVar_list[i])
+
+            with sns.axes_style("darkgrid"):
+
+                plt.plot(range(blah), holavg_list_4, c=clrs[0])
+                plt.fill_between(range(blah), var4min, var4plus, alpha=0.3, facecolor=clrs[0])
+
+                plt.plot(range(blah), holavg_list_32, c=clrs[1])
+                plt.fill_between(range(blah), var32min, var32plus, alpha=0.3,
+                                 facecolor=clrs[1])
+
+                plt.xticks(range(0, blah), xlables)
+                plt.xlabel('Br * 10^9')
+                plt.ylabel('Capacity')
+                plt.grid()
+                plt.plot(range(blah), shavg_list, c=clrs[2])
+                plt.fill_between(range(blah), varshmin, varshplus, alpha=0.3, facecolor=clrs[2])  # label = "classical")
+                plt.xticks(range(0, blah), xlables)
+                plt.xlabel('Br * 10^9')
+                plt.ylabel('Capacity')
+                plt.tight_layout()
+                plt.xticks(rotation=90)
+
+                plt.show()
+
 
