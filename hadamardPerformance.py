@@ -30,13 +30,20 @@ import itertools
 import collections
 import math
 import mpmath
-import scipy
+
 
 plt.rcParams.update({'font.size': 16}) # change font size in plots
 
 def rX(a, K, kappa, equalPort=True):
-    # calculates the received signal when listening at the right or at the wrong port under iid van Mises noise with kappa=kappa
-    # K has to be a power of two!!
+    """
+    This function calculates the received signal when listening at the right or at the wrong port under iid van Mises noise
+    :param a: alpha of the coherent state
+    :param K: Order of the Hadamard code (has to be a power of 2!)
+    :param kappa: kappa of the van Mises distribution
+    :param equalPort: calculates the signal for equal (k' = k) or unequal port (k' =/= k)
+    :return: the received signal (Eq. (10) in paper)
+    """
+
     rx = 0
     s = [0 for i in range(K)]
     if kappa != np.inf:
@@ -56,8 +63,14 @@ def rX(a, K, kappa, equalPort=True):
 
 
 def rX_norm(a, K, c, equalPort=True):
-    # calculates the received signal when listening at the right or at the wrong port under iid wrapped normal noise with c=c
-    # K has to be a power of two!!
+    """
+        This function calculates the received signal when listening at the right or at the wrong port under iid wrapped normal noise
+        :param a: alpha of the coherent state
+        :param K: Order of the Hadamard code (has to be a power of 2!)
+        :param kappa: kappa of the van Mises distribution
+        :param equalPort: calculates the signal for equal (k' = k) or unequal port (k' =/= k)
+        :return: the received signal (Eq. (10) in paper)
+        """
     rx = 0
     s = [0 for i in range(K)]
 
@@ -79,7 +92,14 @@ def rX_norm(a, K, c, equalPort=True):
 
 
 def homodyne(a, displacement, epsilon):
-    # calculates the output probabilities of the homodyne detector
+    """
+    calculates the output probabilities of the homodyne detector
+    :param a: the signal we want to measure
+    :param displacement: alpha of the coherent state
+    :param epsilon: threshold
+    :return: probabilities of homodyne detector (Eq. (28)-(30))
+    """
+
     pMinusA = 0.5*( 1 - scps.erf(np.sqrt(2)*(a+epsilon)))
     pZero = 0.5*( scps.erf(np.sqrt(2)*(epsilon - a)) + scps.erf(np.sqrt(2)*(a+epsilon)))
     #pPlusA = 0.5*( 1 - scps.erf(np.sqrt(2)*(epsilon - a)))
@@ -99,11 +119,16 @@ def homodyne(a, displacement, epsilon):
     return out
 
 def sampledQ(e, K, kappa, samples):
-    # samples the classical channel defined from using a Hadamard receiver with words of length K
-    # the output has form [q( |a,k=l), q( |b,k=l), q( |a,k#l), q( |b,k#l)]
-    # it holds a=sqrt(e) and b=-sqrt(e) (BPSK)
-    # "k = l" indicates the probability distribution at the same port, k#l quantifies the statistics if one listens at the wrong port
-    # print("sampledQ thinks samples equals",samples)
+    """
+    samples the classical channel defined from using a Hadamard receiver with words of length K with BPSK alphabet a=sqrt(e) and b=-sqrt(e)
+    :param e: Photon number
+    :param K: Order of the Hadamard codewords
+    :param kappa: parameter for the von Mises distribution
+    :param samples: how many samples we want
+    :return: the output has form [q( |a,k=l), q( |b,k=l), q( |a,k#l), q( |b,k#l)]
+        ("k = l" indicates the probability distribution at the same port, k#l quantifies the statistics if one listens at the wrong port)
+    """
+
     aa = 0
     ba = 0
     zeroA = 0
@@ -177,11 +202,15 @@ def sampledQ(e, K, kappa, samples):
     return q
 
 def sampledQ_norm(e, K, kappa, samples):
-    # samples the classical channel defined from using a Hadamard receiver with words of length K with wrapped normal phase noise
-    # the output has form [q( |a,k=l), q( |b,k=l), q( |a,k#l), q( |b,k#l)]
-    # it holds a=sqrt(e) and b=-sqrt(e) (BPSK)
-    # "k = l" indicates the probability distribution at the same port, k#l quantifies the statistics if one listens at the wrong port
-    # print("sampledQ thinks samples equals", samples)
+    """
+       samples the classical channel defined from using a Hadamard receiver with words of length K with BPSK alphabet a=sqrt(e) and b=-sqrt(e)
+       :param e: Photon number
+       :param K: Order of the Hadamard codewords
+       :param kappa: parameter for the wrapped normal distribution
+       :param samples: how many samples we want
+       :return: the output has form [q( |a,k=l), q( |b,k=l), q( |a,k#l), q( |b,k#l)]
+           ("k = l" indicates the probability distribution at the same port, k#l quantifies the statistics if one listens at the wrong port)
+       """
     aa = 0
     ba = 0
     zeroA = 0
@@ -251,11 +280,14 @@ def sampledQ_norm(e, K, kappa, samples):
 
 
 def condDistrib(a, bK, k, q):
-    # the transmitted symbol at port k is a
-    # here we are on a logical level, so a can be 0 or 1. Structure is as listed in the definition of q:
-    # q = [[[aa / samples, ba / samples, 0a / samples], [ab / samples, bb / samples, 0b / samples]], 
-    #       [[a0a / samples, b0a / samples, 00a / samples], [a0b / samples, b0b / samples, 00b / samples]]]
-    # the distribution at the correct output port is different from that at all other ports, thus the symbol at that port gets special treatment
+    """
+    Calculates the conditional distribution
+    :param a: transmitted symbol at port k (0 or 1)
+    :param bK:
+    :param k: which port
+    :param q: output of sampledQ(...)
+    :return: the conditional distribution
+    """
     resultAtCorrectPort = int(bK[k])
     count = collections.Counter(bK)
     #print("checking count:",count,sum(count))
@@ -293,26 +325,46 @@ def condDistrib(a, bK, k, q):
 
 
 def outDistrib(q, bK):
-    # here we are on a logical level, so a can be 0 or 1
+    """
+    Calculates the output distribution
+    :param q: output of sampledQ(...)
+    :param bK:
+    :return: the output distribution
+    """
     K = len(bK)
     oD = (1 / K) * (1 / 2) * sum([condDistrib(a, bK, k, q) for k in range(K) for a in range(2)])
     return oD
 
 def pLogP(p):
-    # gives p * log_2(p) as output
+    """
+    Calculates p * log_2(p)
+    :param p: probability
+    :return: p * log_2(p)
+    """
     out = 0
     if p > 0:
         out = p * np.log2(p)
     return out
 
 def size(measType):
-    # alphabet is {0,1,2}^K
+    """
+    Alphabet of the measurement ({0,1,2}^K)
+    :param measType: alphabet
+    :return: size of alphabet
+    """
+    # alphabet is
     length = sum([x for x in measType])
     nPlus1  = measType[0]
     nMinus1 = measType[1]
     return scps.binom(length, nPlus1)*scps.binom(length - nPlus1, nMinus1)
 
 def mutualInformation(q, K):
+    """
+    Calculates the Mutual Information
+    :param q: output of sampledQ(...)
+    :param K: Order of Hadamard
+    :return: the mutual information
+    """
     condH = 0
     outH = 0
     if K > 1:
@@ -355,7 +407,7 @@ def mutualInformation(q, K):
                 # define how many 0's (logical 2) are detected:
                 bK = bK + [ 2 for m in range(K -1 - i - j)  ]
                 # now average over the input variables:
-                #print("calculating output entropy for bK=",bK,"i=",i,"j=",j)
+                # print("calculating output entropy for bK=",bK,"i=",i,"j=",j)
                 for b in range(3):
                     # now bK is defined up to permutation on "zero output ports"
                     od = 0
@@ -378,9 +430,22 @@ def mutualInformation(q, K):
     return outH - condH
 
 def capacity(q, K):
+    """
+    Calculates the capacity
+    :param q: output of sampledQ(...)
+    :param K: Order of Hadamard
+    :return: capacity
+    """
     return mutualInformation( q, K)/K
 
 def shannonCapacity( kappa, e, samples=1000 ):
+    """
+    Calculates the Shannon capacity
+    :param kappa: parameter for von Mises distribution
+    :param e: Photon number
+    :param samples: how many samples we want
+    :return: Shannon capacity
+    """
     s = samples
     qfull = sampledQ( e, 1, kappa, s )
     q = qfull[0]
@@ -396,18 +461,30 @@ def shannonCapacity( kappa, e, samples=1000 ):
     return cap
 
 def kappa(N, B):
-    # N is number of photons per second, B is the baud rate
-    # If both N and B are given as 10**x where x is an integer then things work as expected
+    """
+    calculates kappa for noise model (see paper section V.A)
+    :param N: number of photons per second
+    :param B: baud rate
+    :return: kappa
+    """
     n = math.log(N, 10)
     b = math.log(B, 10)
     return np.power(10, 41 - n - 2*b)
-    #N is the number of photons per second and B the baud rate
+
     
 def g (x):
+    # needed for next function
     return np.log2( 1 + x) + x*np.log2(1 + 1/x)
 
-# this is the spectral efficiency according to the Holevo formula
+
 def sHol (tau, ns, noise):
+    """
+    Spectral efficiency according to Holevo formula
+    :param tau: loss
+    :param ns: photon number
+    :param noise: noise
+    :return: Holevo Spectral Efficency
+    """
     if noise>0:
         return g( ns*tau + noise ) - g( noise)
     else:
@@ -563,6 +640,10 @@ if __name__ == "__main__" :
                 shVariance += (shAvg - shCapacities[step]) ** 2
             shVariance = np.sqrt(shVariance / (20 - 1))
             shVar_list.append(shVariance * br)
+
+
+
+
 
             print("at baudrate=", br, "Shannon average=", shAvg, "variance=", shVariance)
 
