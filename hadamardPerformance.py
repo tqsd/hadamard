@@ -16,7 +16,7 @@
 #    sum_{phi_1,...,phi_K} p_R(b|\tilde a(phi_1, ..., phi_K))
 
 
-import scipy.integrate
+#import scipy.integrate
 import scipy.special as scps
 import seaborn as sns
 import scipy.stats as stats
@@ -30,6 +30,8 @@ import itertools
 import collections
 import math
 import mpmath
+from scipy.stats import norm
+import time
 
 
 plt.rcParams.update({'font.size': 16}) # change font size in plots
@@ -48,40 +50,32 @@ def rX(a, K, kappa, equalPort=True):
     s = [0 for i in range(K)]
     if kappa != np.inf:
         s = np.random.vonmises(0, kappa, K)
-        #print("K=",K,"random von mises numbers are",s)
+
     if equalPort:
         rx = a * sum([np.exp(-complex(0, s[i])) for i in range(K)])/np.sqrt(K)
-        #print("TRUE: rX=",rx)
+
     else:
         diffSum = sum([np.power(-1,i)*np.exp(complex(0, s[i])) for i in range(int(K))])
         rx = a * diffSum/np.sqrt(K)
-        #print("FALSE: difference sum is",diffSum)
-        #print("FALSE: rx should be [",a*diffSum.real/np.sqrt(K),a*diffSum.imag/np.sqrt(K),"]" )
-        #print("FALSE: a=",a)
-        #print("FALSE: rX=",rx)
-    return rx
 
+    return rx
 
 def rX_norm(a, K, c, equalPort=True):
     """
         This function calculates the received signal when listening at the right or at the wrong port under iid wrapped normal noise
         :param a: alpha of the coherent state
         :param K: Order of the Hadamard code (has to be a power of 2!)
-        :param kappa: kappa of the van Mises distribution
+        :param c: sigma of the wrapped normal distribution
         :param equalPort: calculates the signal for equal (k' = k) or unequal port (k' =/= k)
         :return: the received signal (Eq. (10) in paper)
         """
     rx = 0
     s = [0 for i in range(K)]
+    if kappa != np.inf:
+        s = np.random.normal(0, c, K)
 
-    eins = scipy.special.iv(2, c) / scipy.special.iv(0, c)
-    zwei = (scipy.special.iv(1, c) ** 2) / (scipy.special.iv(0, c) ** 2)
-    drei = (scipy.special.iv(1, c) ** 2) / (2*scipy.special.iv(0, c) ** 2)
-    varvm = (eins - zwei)*np.cos(2*0)-drei
-    #rx = rX_norm(a, K, varvm, True)
-    mu = (scipy.special.iv(1,c)/scipy.special.iv(0,c)) * np.cos(0)
-
-    s = np.random.normal(0,varvm**2, size=K)
+        # Wrap the samples to the interval [0, 2*pi)
+        s = np.mod(s, 2 * np.pi)
 
     if equalPort:
         rx = a * sum([np.exp(-complex(0, s[i])) for i in range(K)]) / np.sqrt(K)
@@ -102,11 +96,9 @@ def homodyne(a, displacement, epsilon):
 
     pMinusA = 0.5*( 1 - scps.erf(np.sqrt(2)*(a+epsilon)))
     pZero = 0.5*( scps.erf(np.sqrt(2)*(epsilon - a)) + scps.erf(np.sqrt(2)*(a+epsilon)))
-    #pPlusA = 0.5*( 1 - scps.erf(np.sqrt(2)*(epsilon - a)))
-    #print("a=",a,"displacement=",displacement, "epsilon=",epsilon)
-    #print("pMinus=",pMinusA.real,"pZero=",pZero.real,"pLusA=",pPlusA.real)
+    pPlusA = 0.5*( 1 - scps.erf(np.sqrt(2)*(epsilon - a)))
+
     coin = random.random()
-    #print("coin=",coin)
     out = displacement
     if coin < pMinusA.real:
         out = -displacement
@@ -114,8 +106,7 @@ def homodyne(a, displacement, epsilon):
         out = 0
     elif coin >= pMinusA.real + pZero.real:
         out = displacement
-    #print("-:[0,",pMinusA.real,"], 0:[",pMinusA.real,pMinusA.real + pZero.real,"]","1:[",pMinusA.real + pZero.real,"1]")
-    #print(out)
+
     return out
 
 def sampledQ(e, K, kappa, samples):
@@ -141,18 +132,19 @@ def sampledQ(e, K, kappa, samples):
     a0b = 0
     b0b = 0
     zero0b = 0
-    displ = e*np.sqrt(K)
-    epsilon = displ/2 # has to be optimized
+    displ = e * np.sqrt(K)
+    epsilon = displ / 2
+
     for i in range(samples):
         # calculate what happens if "+" is sent
         a = displ
         b = -a
         # add noise to a
         rx = rX(a, K, kappa, True)
-        #print(rx)
+
         # get output of homodyne receiver if listening at the CORRECT port & check if decoded correctly
         out = homodyne(rx, displ, epsilon)
-        #print(out, a)
+
         if out == a:
             aa += 1
         elif out == b:
@@ -224,7 +216,9 @@ def sampledQ_norm(e, K, kappa, samples):
     b0b = 0
     zero0b = 0
     displ = e * np.sqrt(K)
-    epsilon = displ - (1/np.sqrt(2))*scipy.special.erfinv(1-2*0.1)
+    displ = e * np.sqrt(K)
+    epsilon = displ / 2
+
     for i in range(samples):
         # calculate what happens if "+" is sent
         a = displ
@@ -290,11 +284,11 @@ def condDistrib(a, bK, k, q):
     """
     resultAtCorrectPort = int(bK[k])
     count = collections.Counter(bK)
-    #print("checking count:",count,sum(count))
+
     nPlus1 = count[0]
-    #print(nPlus1)
+
     nMinus1 = count[1]
-    #print(nMinus1)
+
     nZero = len(bK) - nPlus1 - nMinus1
 
     if resultAtCorrectPort == 0:
@@ -303,25 +297,25 @@ def condDistrib(a, bK, k, q):
         nMinus1 -= 1
     if resultAtCorrectPort == 2:
         nZero -= 1
-    #print(nPlus1 + nMinus1 + nZero)
+
     # probability of detecting b given a at the RIGHT port is q[0][a][b]
     # probability of detecting b given a at the WRONG port is q[1][a][b]
     plus = [q[1][a][0] for i in range(nPlus1)]
     minus = [q[1][a][1] for i in range(nMinus1)]
     zero = [q[1][a][2] for i in range(nZero)]
-    #print(plus, minus, zero)
+
     prodPlus = 1
     prodMinus = 1
     prodZero = 1
     if len(plus) > 0:
-        prodPlus = q[1][a][0]**nPlus1#np.prod(plus)
-    if len(minus) >0:
-        prodMinus = q[1][a][1]**nMinus1#np.prod(minus)
+        prodPlus = q[1][a][0] ** nPlus1
+    if len(minus) > 0:
+        prodMinus = q[1][a][1] ** nMinus1
     if len(zero) > 0:
-        prodZero = q[1][a][2]**nZero#np.prod(zero)
-    out = q[0][a][resultAtCorrectPort]*prodPlus*prodMinus*prodZero
-    #print(bK,out)
+        prodZero = q[1][a][2] ** nZero
+    out = q[0][a][resultAtCorrectPort] * prodPlus * prodMinus * prodZero
     return out
+
 
 
 def outDistrib(q, bK):
@@ -352,11 +346,10 @@ def size(measType):
     :param measType: alphabet
     :return: size of alphabet
     """
-    # alphabet is
     length = sum([x for x in measType])
-    nPlus1  = measType[0]
+    nPlus1 = measType[0]
     nMinus1 = measType[1]
-    return scps.binom(length, nPlus1)*scps.binom(length - nPlus1, nMinus1)
+    return scps.binom(length, nPlus1) * scps.binom(length - nPlus1, nMinus1)
 
 def mutualInformation(q, K):
     """
@@ -372,42 +365,36 @@ def mutualInformation(q, K):
         # define how many 1's are detected (logical 0), at ports other than port 0:
         for i in range(K):
             # define how many -1's are detected (logical 1), at ports other than port 1:
-            for j in range(K - i ):
+            for j in range(K - i):
                 # define what was sent at port 0:
                 for a in range(2):
                     # define what was received at port 0:
                     for b in range(3):
                         # create string of measurements, without loss of generality well-ordered:
                         resultAtPortK = [b]
-                        bK = resultAtPortK + [ 0 for m in range(i)]
-                        bK = bK + [ 1 for m in range(j)         ]
+                        bK = resultAtPortK + [0 for m in range(i)]
+                        bK = bK + [1 for m in range(j)]
                         # define how many 0's (logical 2) are detected:
-                        bK = bK + [ 2 for m in range(K - 1 - i - j)  ]
+                        bK = bK + [2 for m in range(K - 1 - i - j)]
                         # assume the correct port (port 0) was chosen by the sender:
-                        #print("K=",K,"bK=",bK)
                         cd = condDistrib(a, bK, 0, q)
                         if cd > 0:
-                            #print("K=",K,"i=",i,"j=",j,[ i, j, K - 1 - i - j ],"has size",size([ i, j, K - 1 - i - j ]),"bK=",bK)
-                            #print("cd=",cd)
-                            condH -= size([ i, j, K - 1 - i - j ]) * cd * np.log2(cd)
+                            condH -= size([i, j, K - 1 - i - j]) * cd * np.log2(cd)
     # there is a total of 2 phases available for the receiver, so we have to divide by two:
-    condH = condH/2
+    condH = condH / 2
     # there are a total of 8 ports, each of them behaves identically, and the sender averages uniformly over the ports. Thus condH is calculated now.
     # the output entropy:
     if K > 1:
-        st1 = 0
-        stAS = 0
         # we look at the cases where the correct port is - without loss of generality - port 0
         # define how many 1's are detected (logical 0), at ports other than port 0:
         for i in range(K):
             # define how many -1's are detected (logical 1), at ports other than port 1:
-            for j in range(K - i ):
-                bK = [ 0 for m in range(i)]
-                bK = bK + [ 1 for m in range(j) ]
+            for j in range(K - i):
+                bK = [0 for m in range(i)]
+                bK = bK + [1 for m in range(j)]
                 # define how many 0's (logical 2) are detected:
-                bK = bK + [ 2 for m in range(K -1 - i - j)  ]
+                bK = bK + [2 for m in range(K - 1 - i - j)]
                 # now average over the input variables:
-                # print("calculating output entropy for bK=",bK,"i=",i,"j=",j)
                 for b in range(3):
                     # now bK is defined up to permutation on "zero output ports"
                     od = 0
@@ -416,17 +403,9 @@ def mutualInformation(q, K):
                             cd = condDistrib(a, [b] + bK, k, q)
                             if cd > 0:
                                 od += cd
-                    od = od/(K*2)
-                    st1 += size([i, j, K - 1 - i - j]) * od
-                    #stAS += size([ i, j, K - i - j ])
+                    od = od / (K * 2)
                     if od > 0:
-                        #print( - size([ i, j, K - i - j ]) * od * np.log2(od))
-                        outH -= size([i, j, K - 1 - i - j])* od * np.log2(od)
-    # for testing purposes
-    #print("sum-to-one test:",st1)
-    #print("sum to alphabet size test:",stAS)
-    #print("outH=",outH)
-    #print("condH=",condH)
+                        outH -= size([i, j, K - 1 - i - j]) * od * np.log2(od)
     return outH - condH
 
 def capacity(q, K):
@@ -449,7 +428,7 @@ def shannonCapacity( kappa, e, samples=1000 ):
     s = samples
     qfull = sampledQ( e, 1, kappa, s )
     q = qfull[0]
-    #print(qfull)
+
     cap = 0
     for i in range(s):
         p = i/s
@@ -469,9 +448,9 @@ def kappa(N, B):
     """
     n = math.log(N, 10)
     b = math.log(B, 10)
-    return np.power(10, 41 - n - 2*b)
+    return (np.power(10, 19 - b) / 6)
 
-    
+
 def g (x):
     # needed for next function
     return np.log2( 1 + x) + x*np.log2(1 + 1/x)
@@ -512,6 +491,8 @@ if __name__ == "__main__" :
     baudrateCheck = True
 
     if mutualInfoCheck:
+
+        start_time = time.time()
         for j in [1, 0.1, 0.001]:
 
             kap = 1
@@ -525,32 +506,35 @@ if __name__ == "__main__" :
             liste2.append(m1)
             for i in range(7):
                 K = int(np.power(2, i))
-                q = sampledQ_norm(a, K, kap, samples)
-                displ = a * np.sqrt(K)
-                epsilon = displ - (1 / np.sqrt(2)) * scipy.special.erfinv(1 - 2 * 0.1)
+                q = sampledQ(a, K, kap, samples)
+
 
                 m = mutualInformation(q, K)
                 c = m / K
                 liste.append(m)
                 liste2.append(c)
                 print("at K=", K, "we have capacity", m, c)
-        # for j in [1, 0.1, 0.001]:
-        #    kap = 1
-        #   a = j
-        #  samples = 1000
-        # print("a=", a, "kappa=", kap, "samples=", samples)
-        # m1 = shannonCapacity(kap, a)
-        # print("benchmark is Shannon capacity", m1)
-        # listeg.append(m1)
-        # liste2g.append(m1)
-        # for i in range(7):
-        #   K = int(np.power(2, i))
-        #  q = sampledQ_norm(a, K, kap, samples)
-        # m = mutualInformation(q, K)
-        # c = m / K
-        # listeg.append(m)
-        # liste2g.append(c)
-        # print("at K=", K, "we have capacity", m, c)
+            for j in [1, 0.1, 0.001]:
+                kap = 1
+                a = j
+                samples = 1000
+                print("a=", a, "kappa=", kap, "samples=", samples)
+                m1 = shannonCapacity(kap, a)
+                print("benchmark is Shannon capacity", m1)
+                listeg.append(m1)
+                liste2g.append(m1)
+                for i in range(7):
+                    K = int(np.power(2, i))
+                    q = sampledQ_norm(a, K, kap, samples)
+                    m = mutualInformation(q, K)
+                    c = m / K
+                    listeg.append(m)
+                    liste2g.append(c)
+                    print("at K=", K, "we have capacity", m, c)
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+
+        print(f"Elapsed time: {elapsed_time} seconds")
         if plot:
             plt.figure()
             xlables = [1, 2, 4, 8, 16, 32, 64]
@@ -560,9 +544,9 @@ if __name__ == "__main__" :
             plt.plot(range(1, 7), liste[2:8], label="vM quantum a = 1")
             plt.plot(range(1, 7), liste[10:16], label="vM quantum a = 0.01")
             plt.plot(range(1, 7), liste[18:24], label="vM quantum a = 0.001")
-            # plt.plot(range(1, 7), listeg[2:8], label="WN quantum a = 1")
-            # plt.plot(range(1, 7), listeg[10:16], label="WN quantum a = 0.01")
-            # plt.plot(range(1, 7), listeg[18:24], label="WN quantum a = 0.001")
+            plt.plot(range(1, 7), listeg[2:8], label="WN quantum a = 1")
+            plt.plot(range(1, 7), listeg[10:16], label="WN quantum a = 0.01")
+            plt.plot(range(1, 7), listeg[18:24], label="WN quantum a = 0.001")
             plt.legend()
             plt.xlim(1, 7)
             plt.xticks(range(0, 7), xlables)
@@ -576,9 +560,9 @@ if __name__ == "__main__" :
             plt.plot(range(1, 7), liste2[2:8], label="vM quantum a = 1")
             plt.plot(range(1, 7), liste2[10:16], label="vM quantum a = 0.01")
             plt.plot(range(1, 7), liste2[18:24], label="vM quantum a = 0.001")
-            # plt.plot(range(1, 7), liste2g[2:8], label="N quantum a = 1")
-            # plt.plot(range(1, 7), liste2g[10:16], label="N quantum a = 0.01")
-            # plt.plot(range(1, 7), liste2g[18:24], label="N quantum a = 0.001")
+            plt.plot(range(1, 7), liste2g[2:8], label="N quantum a = 1")
+            plt.plot(range(1, 7), liste2g[10:16], label="N quantum a = 0.01")
+            plt.plot(range(1, 7), liste2g[18:24], label="N quantum a = 0.001")
             plt.legend()
             plt.xlim(1, 7)
             plt.xticks(range(0, 7), xlables)
@@ -617,11 +601,12 @@ if __name__ == "__main__" :
 
         for b in range(30):
             # loop over baudrates for shannon capacity
+
             br = (100 + b * 10) * (10 ** 9)
             print("photon number is", A / br)
             baudrate_list.append(br / (10 ** 9))
             kap = kappa(10 ** 16, br)
-            print("kappa", kap)
+            print("kap:",kap)
 
             shAvg = 0
             holCapacities = []
@@ -640,10 +625,6 @@ if __name__ == "__main__" :
                 shVariance += (shAvg - shCapacities[step]) ** 2
             shVariance = np.sqrt(shVariance / (20 - 1))
             shVar_list.append(shVariance * br)
-
-
-
-
 
             print("at baudrate=", br, "Shannon average=", shAvg, "variance=", shVariance)
 
